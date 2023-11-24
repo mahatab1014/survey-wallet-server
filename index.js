@@ -1,5 +1,5 @@
 const express = require("express");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const cors = require("cors");
 require("dotenv").config();
@@ -27,6 +27,34 @@ async function run() {
     app.get("/api/v1/surveys", async (req, res) => {
       const results = await surveyCollection.find().toArray();
       res.status(200).send(results);
+    });
+    app.get("/api/v1/survey/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const data = await surveyCollection.findOne(query);
+      res.status(200).send(data);
+    });
+    app.post("/api/v1/survey/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const newData = req.body;
+
+      try {
+        // Update the document in the survey_collection
+        const result = await surveyCollection.updateOne(query, {
+          $push: { participate_user: newData.participate_user },
+          $set: { options: newData.options },
+        });
+
+        if (result.modifiedCount === 1) {
+          res.status(200).json({ message: "Survey updated successfully." });
+        } else {
+          res.status(404).json({ message: "Survey not found." });
+        }
+      } catch (error) {
+        console.error("Error updating survey:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
     });
 
     // Connect the client to the server	(optional starting in v4.7)

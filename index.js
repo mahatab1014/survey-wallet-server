@@ -22,6 +22,7 @@ async function run() {
   try {
     const database = client.db("SurveyWalletDB");
     const surveyCollection = database.collection("survey_collection");
+    const commentsCollection = database.collection("comments_collection");
 
     // survey collection
     app.get("/api/v1/surveys", async (req, res) => {
@@ -168,6 +169,20 @@ async function run() {
         console.error("Error checking participation:", error);
         res.status(500).json({ message: "Internal server error" });
       }
+    });
+
+    app.post("/api/v1/survey-comments", async (req, res) => {
+      const data = req.body;
+      const result = await commentsCollection.insertOne(data);
+      res.status(200).send(result);
+    });
+    app.get("/api/v1/survey-comments/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const query = { survey_id: id };
+
+      const results = await commentsCollection.find(query).toArray();
+      res.status(200).send(results);
     });
 
     // Connect the client to the server	(optional starting in v4.7)

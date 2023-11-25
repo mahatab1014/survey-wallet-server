@@ -58,15 +58,111 @@ async function run() {
     });
     app.get("/api/v1/survey-parti-user", async (req, res) => {
       const { email, id } = req.query;
-      console.log(email, id);
-      const query = { _id: new ObjectId(id), participate_user: email };
+      const query = { _id: new ObjectId(id), "participate_user.user": email };
       // const query = { participate_user: email };
       try {
         const result = await surveyCollection.findOne(query);
+
         if (result) {
-          res.status(200).json({ participate: true });
+          const userVoteData = result.participate_user.find(
+            (user) => user.user === email
+          );
+
+          res.status(200).send({ vote_data: userVoteData, participate: true });
         } else {
           res.status(200).json({ participate: false });
+        }
+      } catch (error) {
+        console.error("Error checking participation:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+    app.post("/api/v1/survey-likes-comments/:id", async (req, res) => {
+      const { id } = req.params;
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "Invalid ObjectId format" });
+      }
+
+      const query = { _id: new ObjectId(id) };
+      const data = req.body;
+
+      try {
+        let updateFields = {};
+
+        if (data.user_liked || data.user_likes) {
+          updateFields = {
+            $push: { user_liked: data.user_liked },
+            $set: { likes: data.likes },
+          };
+        } else {
+          updateFields = {
+            $push: { user_dis_liked: data.user_dis_liked },
+            $set: { dis_likes: data.dis_likes },
+          };
+        }
+
+        const result = await surveyCollection.updateOne(query, updateFields);
+
+        if (result.modifiedCount === 1) {
+          res.status(200).json({ message: "Survey updated successfully." });
+        } else {
+          res.status(404).json({ message: "Survey not found." });
+        }
+      } catch (error) {
+        console.error("Error updating survey:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+      console.log(data);
+    });
+
+    app.get("/api/v1/survey-liked-user", async (req, res) => {
+      const { email, id } = req.query;
+      const query = {
+        _id: new ObjectId(id),
+        "user_liked.email": email,
+      };
+      try {
+        const result = await surveyCollection.findOne(query);
+
+        if (result) {
+          const user_liked = result?.user_liked?.find(
+            (user) => user.email === email
+          );
+
+          res.status(200).send({
+            user_liked: user_liked,
+            liked: true,
+          });
+        } else {
+          res.status(200).json({ liked: false });
+        }
+      } catch (error) {
+        console.error("Error checking participation:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+    app.get("/api/v1/survey-dis-liked-user", async (req, res) => {
+      const { email, id } = req.query;
+      const query = {
+        _id: new ObjectId(id),
+        "user_dis_liked.email": email,
+      };
+      console.log(query);
+      try {
+        const result = await surveyCollection.findOne(query);
+
+        if (result) {
+          const user_dis_liked = result?.user_dis_liked?.find(
+            (user) => user.email === email
+          );
+
+          res.status(200).send({
+            user_dis_liked: user_dis_liked,
+            dis_liked: true,
+          });
+        } else {
+          res.status(200).json({ dis_liked: false });
         }
       } catch (error) {
         console.error("Error checking participation:", error);

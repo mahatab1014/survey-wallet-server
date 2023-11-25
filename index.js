@@ -56,6 +56,23 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
+    app.get("/api/v1/survey-parti-user", async (req, res) => {
+      const { email, id } = req.query;
+      console.log(email, id);
+      const query = { _id: new ObjectId(id), participate_user: email };
+      // const query = { participate_user: email };
+      try {
+        const result = await surveyCollection.findOne(query);
+        if (result) {
+          res.status(200).json({ participate: true });
+        } else {
+          res.status(200).json({ participate: false });
+        }
+      } catch (error) {
+        console.error("Error checking participation:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
 
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();

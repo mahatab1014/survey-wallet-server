@@ -32,6 +32,26 @@ async function run() {
       const result = await surveyCollection.insertOne(data);
       res.status(200).send(result);
     });
+    app.put("/api/v1/survey-update/:id", async (req, res) => {
+      const { id } = req.params;
+      console.log("Survey ID:", id);
+      const data = req.body;
+      try {
+        const updatedSurvey = await surveyCollection.findOneAndUpdate(
+          { _id: new ObjectId(id) },
+          { $set: data },
+          { returnDocument: "after" }
+        );
+        if (!updatedSurvey.value) {
+          return res.status(404).json({ message: "Survey not found" });
+        }
+        console.log("Updated survey:", updatedSurvey.value);
+        res.status(200).json(updatedSurvey.value);
+      } catch (error) {
+        console.error("Error updating survey:", error.message);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
     app.get("/api/v1/surveys", async (req, res) => {
       const results = await surveyCollection.find().toArray();
       res.status(200).send(results);
@@ -95,7 +115,6 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-
     app.post("/api/v1/survey-likes-comments/:id", async (req, res) => {
       const { id } = req.params;
       if (!ObjectId.isValid(id)) {
@@ -133,7 +152,6 @@ async function run() {
       }
       console.log(data);
     });
-
     app.get("/api/v1/survey-liked-user", async (req, res) => {
       const { email, id } = req.query;
       const query = {
@@ -186,7 +204,6 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-
     app.post("/api/v1/survey-comments", async (req, res) => {
       const data = req.body;
       const result = await commentsCollection.insertOne(data);
@@ -339,7 +356,6 @@ async function run() {
         res.status(500).send("Internal Server Error");
       }
     });
-
     app.get("/api/v1/user/:email", async (req, res) => {
       const { email } = req.params;
       const query = { email: email };

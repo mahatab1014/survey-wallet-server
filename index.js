@@ -24,6 +24,7 @@ async function run() {
     const surveyCollection = database.collection("survey_collection");
     const usersCollection = database.collection("users_collection");
     const commentsCollection = database.collection("comments_collection");
+    const reportCollection = database.collection("report_collection");
 
     // survey collection
     app.post("/api/v1/surveys", async (req, res) => {
@@ -165,7 +166,6 @@ async function run() {
         _id: new ObjectId(id),
         "user_dis_liked.email": email,
       };
-      console.log(query);
       try {
         const result = await surveyCollection.findOne(query);
 
@@ -248,6 +248,39 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
+
+    app.post("/api/v1/report-survey", async (req, res) => {
+      const data = req.body;
+      const result = await reportCollection.insertOne(data);
+      res.send(result);
+    });
+    app.get("/api/v1/report-survey", async (req, res) => {
+      const result = await reportCollection.find().toArray();
+      res.send(result);
+    });
+    app.get("/api/v1/single-report-survey", async (req, res) => {
+      const { email, id } = req.query;
+      console.log("report", id);
+      console.log("report", email);
+      const query = {
+        survey_id: id,
+        "user_reported.email": email,
+      };
+      const result = await reportCollection.findOne(query);
+      res.send(result);
+    });
+    app.delete("/api/v1/survey-report/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const result = await reportCollection.deleteOne(query);
+      if (result.deletedCount === 1) {
+        res.status(200).json({ message: "Survey deleted successfully." });
+      } else {
+        res.status(404).json({ message: "Survey not found." });
+      }
+    });
+
+    // ::::::: USER API :::::::::
     app.put("/api/v1/users/:email", async (req, res) => {
       const { email } = req.params;
       const data = req.body;
@@ -287,18 +320,21 @@ async function run() {
         const user = await usersCollection.findOneAndUpdate(query, {
           $set: { role: data.role },
         });
-
-        console.log(data);
         res.json({ message: "User role updated successfully" });
       } catch (error) {
         console.error("Error updating user role:", error);
         res.status(500).json({ message: "Internal server error" });
       }
     });
-
     app.get("/api/v1/users", async (req, res) => {
       const results = await usersCollection.find().toArray();
       res.send(results);
+    });
+    app.get("/api/v1/user/:email", async (req, res) => {
+      const { email } = req.params;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      res.send(user);
     });
 
     // Connect the client to the server	(optional starting in v4.7)

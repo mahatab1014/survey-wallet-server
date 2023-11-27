@@ -25,6 +25,11 @@ async function run() {
     const commentsCollection = database.collection("comments_collection");
 
     // survey collection
+    app.post("/api/v1/surveys", async (req, res) => {
+      const data = req.body;
+      const result = await surveyCollection.insertOne(data);
+      res.status(200).send(result);
+    });
     app.get("/api/v1/surveys", async (req, res) => {
       const results = await surveyCollection.find().toArray();
       res.status(200).send(results);
@@ -55,6 +60,16 @@ async function run() {
       } catch (error) {
         console.error("Error updating survey:", error);
         res.status(500).json({ message: "Internal server error" });
+      }
+    });
+    app.delete("/api/v1/survey/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const result = await surveyCollection.deleteOne(query);
+      if (result.deletedCount === 1) {
+        res.status(200).json({ message: "Survey deleted successfully." });
+      } else {
+        res.status(404).json({ message: "Survey not found." });
       }
     });
     app.get("/api/v1/survey-parti-user", async (req, res) => {
@@ -183,6 +198,54 @@ async function run() {
 
       const results = await commentsCollection.find(query).toArray();
       res.status(200).send(results);
+    });
+    app.post("/api/v1/survey-featured/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const data = req.body;
+      try {
+        let updateFeatured = {};
+
+        if (data?.featured === "true") {
+          updateFeatured = {
+            $set: { featured: "true" },
+          };
+        } else {
+          updateFeatured = {
+            $set: { featured: "false" },
+          };
+        }
+
+        const result = await surveyCollection.updateOne(query, updateFeatured);
+
+        if (result.modifiedCount === 1) {
+          res.status(200).json({ message: "Survey updated successfully." });
+        } else {
+          res.status(404).json({ message: "Survey not found." });
+        }
+      } catch (error) {
+        console.error("Error updating survey:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+    app.put("/api/v1/survey-status/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const data = req.body;
+      try {
+        let updateFeatured = { $set: data };
+
+        const result = await surveyCollection.updateOne(query, updateFeatured);
+
+        if (result.modifiedCount === 1) {
+          res.status(200).json({ message: "Survey updated successfully." });
+        } else {
+          res.status(404).json({ message: "Survey not found." });
+        }
+      } catch (error) {
+        console.error("Error updating survey:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
     });
 
     // Connect the client to the server	(optional starting in v4.7)

@@ -249,6 +249,7 @@ async function run() {
       }
     });
 
+    // :::::::: Survey Report API ::::::::::
     app.post("/api/v1/report-survey", async (req, res) => {
       const data = req.body;
       const result = await reportCollection.insertOne(data);
@@ -326,10 +327,19 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-    app.get("/api/v1/users", async (req, res) => {
-      const results = await usersCollection.find().toArray();
-      res.send(results);
+    app.get("/api/v1/users/:role?", async (req, res) => {
+      const { role } = req.params;
+      const query = role ? { role: role } : {};
+
+      try {
+        const result = await usersCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error("Error:", error);
+        res.status(500).send("Internal Server Error");
+      }
     });
+
     app.get("/api/v1/user/:email", async (req, res) => {
       const { email } = req.params;
       const query = { email: email };

@@ -22,6 +22,7 @@ async function run() {
   try {
     const database = client.db("SurveyWalletDB");
     const surveyCollection = database.collection("survey_collection");
+    const usersCollection = database.collection("users_collection");
     const commentsCollection = database.collection("comments_collection");
 
     // survey collection
@@ -246,6 +247,58 @@ async function run() {
         console.error("Error updating survey:", error);
         res.status(500).json({ message: "Internal server error" });
       }
+    });
+    app.put("/api/v1/users/:email", async (req, res) => {
+      const { email } = req.params;
+      const data = req.body;
+
+      const existingUser = await usersCollection.findOne({ email });
+      try {
+        if (existingUser) {
+          // If user exists, update the IP address
+          await usersCollection.updateOne(
+            { email },
+            { $set: { last_login_ip: data.last_login_ip } }
+          );
+          res.json({ message: "User updated successfully" });
+        } else {
+          // If user does not exist, insert the new user data
+          await usersCollection.insertOne({
+            name: data.name,
+            email: data.email,
+            email_verified: data.email_verified,
+            role: data.role,
+            profile_pic: data.profile_pic,
+            last_login_ip: data.last_login_ip,
+          });
+          res.json({ message: "User inserted successfully" });
+        }
+      } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+    app.put("/api/v1/user-role/:id", async (req, res) => {
+      const { id } = req.params;
+      const data = req.body;
+      const query = { _id: new ObjectId(id) };
+
+      try {
+        const user = await usersCollection.findOneAndUpdate(query, {
+          $set: { role: data.role },
+        });
+
+        console.log(data);
+        res.json({ message: "User role updated successfully" });
+      } catch (error) {
+        console.error("Error updating user role:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+    app.get("/api/v1/users", async (req, res) => {
+      const results = await usersCollection.find().toArray();
+      res.send(results);
     });
 
     // Connect the client to the server	(optional starting in v4.7)

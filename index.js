@@ -3,6 +3,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const cors = require("cors");
 require("dotenv").config();
+const stripe = require("stripe")(process.env.Stripe_Secret_KEY);
 const port = 5000;
 
 app.use(cors());
@@ -25,6 +26,7 @@ async function run() {
     const usersCollection = database.collection("users_collection");
     const commentsCollection = database.collection("comments_collection");
     const reportCollection = database.collection("report_collection");
+    const paymentCollection = database.collection("payment_collection");
 
     // survey collection
     app.post("/api/v1/surveys", async (req, res) => {
@@ -368,6 +370,40 @@ async function run() {
       const query = { email: email };
       const user = await usersCollection.findOne(query);
       res.send(user);
+    });
+
+    // :::::: Payment Method ::::::
+    app.post("/api/v1/create-payment-intent", async (req, res) => {
+      const { price } = req.body;
+      const amount = parseFloat(price * 100);
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+        res.send({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.error("Error creating payment intent:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+    app.post("/api/v1/payment-transactions", async (req, res) => {
+      const data = req.body;
+      const result = await paymentCollection.insertOne(data);
+      res.status(200).send(result);
+    });
+    app.get("/api/v1/payment-transactions", async (req, res) => {
+      const result = await paymentCollection.find().toArray();
+      res.status(200).send(result);
+    });
+    app.get("/api/v1/payment-transactions-user/:email", async (req, res) => {
+      const { email } = req.params;
+      const query = { email: email };
+      const result = await paymentCollection.find(query).toArray();
+      res.status(200).send(result);
     });
 
     // Connect the client to the server	(optional starting in v4.7)

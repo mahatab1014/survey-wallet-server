@@ -1,13 +1,23 @@
 const express = require("express");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const jwt = require("jsonwebtoken");
 const app = express();
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 require("dotenv").config();
 const stripe = require("stripe")(process.env.Stripe_Secret_KEY);
 const port = 5000;
 
-app.use(cors());
+const allowedOrigins = ["http://localhost:5173"];
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.mquj3zk.mongodb.net/?retryWrites=true&w=majority`;
 
@@ -28,13 +38,85 @@ async function run() {
     const reportCollection = database.collection("report_collection");
     const paymentCollection = database.collection("payment_collection");
 
+    // ::::: Middleware
+    const logger = (req, res, next) => {
+      console.log("log: info", req.method, req.url);
+      next();
+    };
+    const verifyToken = (req, res, next) => {
+      const token = req?.cookies?.token;
+      if (!token) {
+        return res.status(401).send({ message: "unauthorized" });
+      }
+      jwt.verify(token, process.env.JWT_SECRET_ACCESS_TOKEN, (err, decoded) => {
+        if (err) {
+          return res.status(401).send({ message: "unauthorized" });
+        }
+        req.user = decoded;
+        next();
+      });
+    };
+    const verifyAdmin = async (req, res, next) => {
+      const decoded = req.user; // Access the decoded object set by verifyToken
+      const email = decoded.email;
+
+      const query = { email: email };
+      console.log("admin email :", email);
+
+      try {
+        const user = await usersCollection.findOne(query);
+        const isAdmin = user?.role === "admin";
+        console.log(isAdmin);
+        if (!isAdmin) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+
+        next();
+      } catch (error) {
+        console.error("Error verifying admin:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    };
+
+    // :::: Json Web Token :::::
+    app.post("/api/v1/jwt", logger, async (req, res) => {
+      const user = req.body;
+      console.log("user for token", user);
+      const token = jwt.sign(user, process.env.JWT_SECRET_ACCESS_TOKEN, {
+        expiresIn: "24h",
+      });
+
+      try {
+        res.cookie("token", token, {
+          httpOnly: false,
+          secure: process.env.NODE_ENV === "production" ? true : false,
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        });
+        res.send({ success: true });
+      } catch (error) {
+        console.error("Error setting token as a cookie:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+    app.post("/api/v1/logout", async (req, res) => {
+      const user = req.body;
+      console.log("logging out", user);
+      res
+        .clearCookie("token", {
+          maxAge: 0,
+          secure: process.env.NODE_ENV === "production" ? true : false,
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        })
+        .send({ success: true });
+    });
+
     // survey collection
-    app.post("/api/v1/surveys", async (req, res) => {
+    app.post("/api/v1/surveys", verifyToken, async (req, res) => {
       const data = req.body;
       const result = await surveyCollection.insertOne(data);
       res.status(200).send(result);
     });
-    app.put("/api/v1/survey-update/:id", async (req, res) => {
+    app.put("/api/v1/survey-update/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       console.log("Survey ID:", id);
       const data = req.body;
@@ -65,13 +147,17 @@ async function run() {
       res.status(200).send(data);
     });
     // ::: find survey by email address :::::
-    app.get("/api/v1/find-survey-by-email/:email", async (req, res) => {
-      const { email } = req.params;
-      const query = { "user.email": email };
-      const data = await surveyCollection.find(query).toArray();
-      res.status(200).send(data);
-    });
-    app.post("/api/v1/survey/:id", async (req, res) => {
+    app.get(
+      "/api/v1/find-survey-by-email/:email",
+      verifyToken,
+      async (req, res) => {
+        const { email } = req.params;
+        const query = { "user.email": email };
+        const data = await surveyCollection.find(query).toArray();
+        res.status(200).send(data);
+      }
+    );
+    app.post("/api/v1/survey/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const query = { _id: new ObjectId(id) };
       const newData = req.body;
@@ -93,7 +179,7 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-    app.delete("/api/v1/survey/:id", async (req, res) => {
+    app.delete("/api/v1/survey/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const query = { _id: new ObjectId(id) };
       const result = await surveyCollection.deleteOne(query);
@@ -124,43 +210,47 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-    app.post("/api/v1/survey-likes-comments/:id", async (req, res) => {
-      const { id } = req.params;
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ message: "Invalid ObjectId format" });
-      }
-
-      const query = { _id: new ObjectId(id) };
-      const data = req.body;
-
-      try {
-        let updateFields = {};
-
-        if (data.user_liked || data.user_likes) {
-          updateFields = {
-            $push: { user_liked: data.user_liked },
-            $set: { likes: data.likes },
-          };
-        } else {
-          updateFields = {
-            $push: { user_dis_liked: data.user_dis_liked },
-            $set: { dis_likes: data.dis_likes },
-          };
+    app.post(
+      "/api/v1/survey-likes-comments/:id",
+      verifyToken,
+      async (req, res) => {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid ObjectId format" });
         }
 
-        const result = await surveyCollection.updateOne(query, updateFields);
+        const query = { _id: new ObjectId(id) };
+        const data = req.body;
 
-        if (result.modifiedCount === 1) {
-          res.status(200).json({ message: "Survey updated successfully." });
-        } else {
-          res.status(404).json({ message: "Survey not found." });
+        try {
+          let updateFields = {};
+
+          if (data.user_liked || data.user_likes) {
+            updateFields = {
+              $push: { user_liked: data.user_liked },
+              $set: { likes: data.likes },
+            };
+          } else {
+            updateFields = {
+              $push: { user_dis_liked: data.user_dis_liked },
+              $set: { dis_likes: data.dis_likes },
+            };
+          }
+
+          const result = await surveyCollection.updateOne(query, updateFields);
+
+          if (result.modifiedCount === 1) {
+            res.status(200).json({ message: "Survey updated successfully." });
+          } else {
+            res.status(404).json({ message: "Survey not found." });
+          }
+        } catch (error) {
+          console.error("Error updating survey:", error);
+          res.status(500).json({ message: "Internal server error" });
         }
-      } catch (error) {
-        console.error("Error updating survey:", error);
-        res.status(500).json({ message: "Internal server error" });
+        console.log(data);
       }
-      console.log(data);
-    });
+    );
     app.get("/api/v1/survey-liked-user", async (req, res) => {
       const { email, id } = req.query;
       const query = {
@@ -213,7 +303,7 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-    app.post("/api/v1/survey-comments", async (req, res) => {
+    app.post("/api/v1/survey-comments", verifyToken, async (req, res) => {
       const data = req.body;
       const result = await commentsCollection.insertOne(data);
       res.status(200).send(result);
@@ -226,36 +316,44 @@ async function run() {
       const results = await commentsCollection.find(query).toArray();
       res.status(200).send(results);
     });
-    app.post("/api/v1/survey-featured/:id", async (req, res) => {
-      const { id } = req.params;
-      const query = { _id: new ObjectId(id) };
-      const data = req.body;
-      try {
-        let updateFeatured = {};
+    app.post(
+      "/api/v1/survey-featured/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const query = { _id: new ObjectId(id) };
+        const data = req.body;
+        try {
+          let updateFeatured = {};
 
-        if (data?.featured === "true") {
-          updateFeatured = {
-            $set: { featured: "true" },
-          };
-        } else {
-          updateFeatured = {
-            $set: { featured: "false" },
-          };
+          if (data?.featured === "true") {
+            updateFeatured = {
+              $set: { featured: "true" },
+            };
+          } else {
+            updateFeatured = {
+              $set: { featured: "false" },
+            };
+          }
+
+          const result = await surveyCollection.updateOne(
+            query,
+            updateFeatured
+          );
+
+          if (result.modifiedCount === 1) {
+            res.status(200).json({ message: "Survey updated successfully." });
+          } else {
+            res.status(404).json({ message: "Survey not found." });
+          }
+        } catch (error) {
+          console.error("Error updating survey:", error);
+          res.status(500).json({ message: "Internal server error" });
         }
-
-        const result = await surveyCollection.updateOne(query, updateFeatured);
-
-        if (result.modifiedCount === 1) {
-          res.status(200).json({ message: "Survey updated successfully." });
-        } else {
-          res.status(404).json({ message: "Survey not found." });
-        }
-      } catch (error) {
-        console.error("Error updating survey:", error);
-        res.status(500).json({ message: "Internal server error" });
       }
-    });
-    app.put("/api/v1/survey-status/:id", async (req, res) => {
+    );
+    app.put("/api/v1/survey-status/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const query = { _id: new ObjectId(id) };
       const data = req.body;
@@ -276,19 +374,22 @@ async function run() {
     });
 
     // :::::::: Survey Report API ::::::::::
-    app.post("/api/v1/report-survey", async (req, res) => {
+    app.post("/api/v1/report-survey", verifyToken, async (req, res) => {
       const data = req.body;
       const result = await reportCollection.insertOne(data);
       res.send(result);
     });
-    app.get("/api/v1/report-survey", async (req, res) => {
-      const result = await reportCollection.find().toArray();
-      res.send(result);
-    });
-    app.get("/api/v1/single-report-survey", async (req, res) => {
+    app.get(
+      "/api/v1/report-survey",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const result = await reportCollection.find().toArray();
+        res.send(result);
+      }
+    );
+    app.get("/api/v1/single-report-survey", verifyToken, async (req, res) => {
       const { email, id } = req.query;
-      console.log("report", id);
-      console.log("report", email);
       const query = {
         survey_id: id,
         "user_reported.email": email,
@@ -296,19 +397,24 @@ async function run() {
       const result = await reportCollection.findOne(query);
       res.send(result);
     });
-    app.delete("/api/v1/survey-report/:id", async (req, res) => {
-      const { id } = req.params;
-      const query = { _id: new ObjectId(id) };
-      const result = await reportCollection.deleteOne(query);
-      if (result.deletedCount === 1) {
-        res.status(200).json({ message: "Survey deleted successfully." });
-      } else {
-        res.status(404).json({ message: "Survey not found." });
+    app.delete(
+      "/api/v1/survey-report/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { id } = req.params;
+        const query = { _id: new ObjectId(id) };
+        const result = await reportCollection.deleteOne(query);
+        if (result.deletedCount === 1) {
+          res.status(200).json({ message: "Survey deleted successfully." });
+        } else {
+          res.status(404).json({ message: "Survey not found." });
+        }
       }
-    });
+    );
 
     // ::::::: USER API :::::::::
-    app.put("/api/v1/users/:email", async (req, res) => {
+    app.put("/api/v1/users/:email", verifyToken, async (req, res) => {
       const { email } = req.params;
       const data = req.body;
 
@@ -338,7 +444,7 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-    app.put("/api/v1/user-role/:id", async (req, res) => {
+    app.put("/api/v1/user-role/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const data = req.body;
       const query = { _id: new ObjectId(id) };
@@ -353,19 +459,24 @@ async function run() {
         res.status(500).json({ message: "Internal server error" });
       }
     });
-    app.get("/api/v1/users/:role?", async (req, res) => {
-      const { role } = req.params;
-      const query = role ? { role: role } : {};
+    app.get(
+      "/api/v1/users/:role?",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { role } = req.params;
+        const query = role ? { role: role } : {};
 
-      try {
-        const result = await usersCollection.find(query).toArray();
-        res.send(result);
-      } catch (error) {
-        console.error("Error:", error);
-        res.status(500).send("Internal Server Error");
+        try {
+          const result = await usersCollection.find(query).toArray();
+          res.send(result);
+        } catch (error) {
+          console.error("Error:", error);
+          res.status(500).send("Internal Server Error");
+        }
       }
-    });
-    app.get("/api/v1/user/:email", async (req, res) => {
+    );
+    app.get("/api/v1/user/:email", verifyToken, async (req, res) => {
       const { email } = req.params;
       const query = { email: email };
       const user = await usersCollection.findOne(query);
@@ -373,7 +484,7 @@ async function run() {
     });
 
     // :::::: Payment Method ::::::
-    app.post("/api/v1/create-payment-intent", async (req, res) => {
+    app.post("/api/v1/create-payment-intent", verifyToken, async (req, res) => {
       const { price } = req.body;
       const amount = parseFloat(price * 100);
       try {
@@ -390,21 +501,30 @@ async function run() {
         res.status(500).send({ error: "Internal Server Error" });
       }
     });
-    app.post("/api/v1/payment-transactions", async (req, res) => {
+    app.post("/api/v1/payment-transactions", verifyToken, async (req, res) => {
       const data = req.body;
       const result = await paymentCollection.insertOne(data);
       res.status(200).send(result);
     });
-    app.get("/api/v1/payment-transactions", async (req, res) => {
-      const result = await paymentCollection.find().toArray();
-      res.status(200).send(result);
-    });
-    app.get("/api/v1/payment-transactions-user/:email", async (req, res) => {
-      const { email } = req.params;
-      const query = { email: email };
-      const result = await paymentCollection.find(query).toArray();
-      res.status(200).send(result);
-    });
+    app.get(
+      "/api/v1/payment-transactions",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const result = await paymentCollection.find().toArray();
+        res.status(200).send(result);
+      }
+    );
+    app.get(
+      "/api/v1/payment-transactions-user/:email",
+      verifyToken,
+      async (req, res) => {
+        const { email } = req.params;
+        const query = { email: email };
+        const result = await paymentCollection.find(query).toArray();
+        res.status(200).send(result);
+      }
+    );
 
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();

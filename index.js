@@ -62,6 +62,13 @@ async function run() {
       const data = await surveyCollection.findOne(query);
       res.status(200).send(data);
     });
+    // ::: find survey by email address :::::
+    app.get("/api/v1/find-survey-by-email/:email", async (req, res) => {
+      const { email } = req.params;
+      const query = { "user.email": email };
+      const data = await surveyCollection.find(query).toArray();
+      res.status(200).send(data);
+    });
     app.post("/api/v1/survey/:id", async (req, res) => {
       const { id } = req.params;
       const query = { _id: new ObjectId(id) };

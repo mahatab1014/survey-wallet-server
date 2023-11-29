@@ -6,9 +6,12 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 require("dotenv").config();
 const stripe = require("stripe")(process.env.Stripe_Secret_KEY);
-const port = 5000;
+const port = process.env.PORT || 5000;
 
-const allowedOrigins = ["http://localhost:5173"];
+const allowedOrigins = [
+  "https://survey-wallet-1014.web.app",
+  "https://survey-wallet-1014.firebaseapp.com",
+];
 
 app.use(
   cors({
@@ -88,7 +91,7 @@ async function run() {
 
       try {
         res.cookie("token", token, {
-          httpOnly: false,
+          httpOnly: true,
           secure: process.env.NODE_ENV === "production" ? true : false,
           sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
         });

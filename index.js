@@ -12,7 +12,6 @@ const allowedOrigins = [
   "https://survey-wallet-1014.web.app",
   "https://survey-wallet-1014.firebaseapp.com",
 ];
-
 app.use(
   cors({
     origin: allowedOrigins,
@@ -27,7 +26,7 @@ const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
-    strict: true,
+    strict: false,
     deprecationErrors: true,
   },
 });
@@ -36,6 +35,8 @@ async function run() {
   try {
     const database = client.db("SurveyWalletDB");
     const surveyCollection = database.collection("survey_collection");
+    await surveyCollection.createIndex({ title: "text" });
+
     const usersCollection = database.collection("users_collection");
     const commentsCollection = database.collection("comments_collection");
     const reportCollection = database.collection("report_collection");
@@ -149,6 +150,46 @@ async function run() {
       const data = await surveyCollection.findOne(query);
       res.status(200).send(data);
     });
+    app.get("/api/v1/survey-filter", async (req, res) => {
+      const page = parseInt(req.query.page) || 0;
+      const size = parseInt(req.query.size) || 10;
+      const searchQuery = req.query.search || "";
+      const category = req.query.category || "";
+
+      try {
+        const skip = page * size;
+        const limit = size;
+
+        let filterCriteria = {};
+
+        if (category !== "") {
+          filterCriteria = {
+            $and: [{ $text: { $search: searchQuery } }, { category: category }],
+          };
+        } else {
+          filterCriteria = {
+            $text: { $search: searchQuery },
+          };
+        }
+
+        // Use $text operator for text search along with category filter
+        const surveys = await surveyCollection
+          .find(filterCriteria, { score: { $meta: "textScore" } })
+          .sort({ score: { $meta: "textScore" } })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        res.status(200).send(surveys);
+      } catch (error) {
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+    app.get("/api/v1/total-surveys", async (req, res) => {
+      const total = await surveyCollection.estimatedDocumentCount();
+      res.status(200).send({ total: total });
+    });
+
     // ::: find survey by email address :::::
     app.get(
       "/api/v1/find-survey-by-email/:email",
@@ -526,6 +567,36 @@ async function run() {
         const query = { email: email };
         const result = await paymentCollection.find(query).toArray();
         res.status(200).send(result);
+      }
+    );
+
+    // :::::::: Total Collection ::::::
+    app.get(
+      "/api/v1/total-collection-count",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const pipeline = [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$price" },
+            },
+          },
+        ];
+        const totalUser = await usersCollection.estimatedDocumentCount();
+        const totalSurvey = await surveyCollection.estimatedDocumentCount();
+        const totalComment = await commentsCollection.estimatedDocumentCount();
+        const totalRevenue = await paymentCollection
+          .aggregate(pipeline)
+          .toArray();
+
+        res.status(200).send({
+          total_user: totalUser,
+          total_survey: totalSurvey,
+          total_comment: totalComment,
+          total_revenue: totalRevenue,
+        });
       }
     );
 
